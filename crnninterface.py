@@ -1,0 +1,82 @@
+import tensorflow as tf
+import os.path as ops
+import numpy as np
+import cv2
+import argparse
+import matplotlib.pyplot as plt
+
+
+from crnn.crnn_model import crnn_model
+from crnn.global_configuration import config
+from crnn.local_utils import log_utils, data_utils
+
+logger = log_utils.init_logger()
+
+
+class crnnclass(object):
+
+    def __init__(self):
+        self.image_path = 'crnn/data/test_images/test_05.jpg'
+        self.checkpoint_dir = '/home/han/project/github-proj/CRNN_Tensorflow_Old_Version/model/shadownet/shadownet_2017-10-17-11-47-46.ckpt-199999'
+        self.num_classes = 37
+
+    def crnn_detect(self, is_vis: bool=True):
+        """
+        :param image_path:
+        :param weights_path:
+        :param is_vis:
+        :param num_classes:
+        """
+
+        image = cv2.imread(self.image_path, cv2.IMREAD_COLOR)
+        image = cv2.resize(image, tuple(config.cfg.ARCH.INPUT_SIZE))
+        image = np.expand_dims(image, axis=0).astype(np.float32)
+
+        w, h = config.cfg.ARCH.INPUT_SIZE
+        inputdata = tf.placeholder(dtype=tf.float32, shape=[1, h, w, 3], name='input')
+
+        codec = data_utils.TextFeatureIO()
+        self.num_classes = len(codec.reader.char_dict) + 1 if self.num_classes == 0 else self.num_classes
+
+        net = crnn_model.ShadowNet(phase='Test',
+                                   hidden_nums=config.cfg.ARCH.HIDDEN_UNITS,
+                                   layers_nums=config.cfg.ARCH.HIDDEN_LAYERS,
+                                   num_classes=self.num_classes)
+
+        with tf.variable_scope('shadow'):
+            net_out = net.build_shadownet(inputdata=inputdata)
+
+        decodes, _ = tf.nn.ctc_beam_search_decoder(inputs=net_out, sequence_length=config.cfg.ARCH.SEQ_LENGTH*np.ones(1),
+                                                   merge_repeated=False)
+
+        # config tf session
+        sess_config = tf.ConfigProto()
+        sess_config.gpu_options.per_process_gpu_memory_fraction = config.cfg.TRAIN.GPU_MEMORY_FRACTION
+        sess_config.gpu_options.allow_growth = config.cfg.TRAIN.TF_ALLOW_GROWTH
+
+        # config tf saver
+        saver = tf.train.Saver()
+
+        sess = tf.Session(config=sess_config)
+
+        with sess.as_default():
+
+            saver.restore(sess=sess, save_path=self.checkpoint_dir)
+
+            preds = sess.run(decodes, feed_dict={inputdata: image})
+
+            preds = codec.writer.sparse_tensor_to_str(preds[0])
+
+            logger.info('Predict image {:s} label {:s}'.format(ops.split(self.image_path)[1], preds[0]))
+
+            if is_vis:
+                plt.figure('CRNN Model Demo')
+                plt.imshow(cv2.imread(self.image_path, cv2.IMREAD_COLOR)[:, :, (2, 1, 0)])
+                plt.show()
+
+            sess.close()
+
+
+if __name__ == '__main__':
+    mycrnn = crnnclass()
+    mycrnn.crnn_detect()
