@@ -20,7 +20,7 @@ class crnnclass(object):
 
     def __init__(self):
         self.image_dir = 'data/output/EAST/'
-        self.checkpoint_dir = 'model/checkpoint/crnn'
+        self.checkpoint_dir = 'model/checkpoint/crnn/'
         self.num_classes = 37
 
     def get_images(self):
