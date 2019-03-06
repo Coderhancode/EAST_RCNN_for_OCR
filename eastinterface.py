@@ -14,9 +14,9 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 class eastclass(object):
 
     def __init__(self):
-        self.output_dir = 'output/EAST/'
-        self.test_data_dir = '/home/han/project/github-proj/EAST/input/test_img/'
-        self.checkpoint_dir = '/home/han/project/model/east_icdar2015_resnet_v1_50_rbox'
+        self.output_dir = 'data/output/EAST/'
+        self.test_data_dir = 'data/input/test_img/'
+        self.checkpoint_dir = 'model/checkpoint/east/'
         self.no_write_images = False
 
 

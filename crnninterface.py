@@ -19,8 +19,8 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 class crnnclass(object):
 
     def __init__(self):
-        self.image_dir = 'output/EAST/'
-        self.checkpoint_dir = '/home/han/project/github-proj/CRNN_Tensorflow_Old_Version/model/shadownet/shadownet_2017-10-17-11-47-46.ckpt-199999'
+        self.image_dir = 'data/output/EAST/'
+        self.checkpoint_dir = 'model/checkpoint/crnn'
         self.num_classes = 37
 
     def get_images(self):
