@@ -9,12 +9,14 @@ import east.lanms as lanms
 import east.model as model
 from east.icdar import restore_rectangle
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
 class eastclass(object):
 
     def __init__(self):
         self.output_dir = 'output/EAST/'
         self.test_data_dir = '/home/han/project/github-proj/EAST/input/test_img/'
-        self.checkpoint_dir = 'east/east_icdar2015_resnet_v1_50_rbox/'
+        self.checkpoint_dir = '/home/han/project/model/east_icdar2015_resnet_v1_50_rbox'
         self.no_write_images = False
 
 
@@ -138,71 +140,72 @@ class eastclass(object):
             if e.errno != 17:
                 raise
 
-        with tf.device('/device:GPU:0'):
-            with tf.get_default_graph().as_default():
-                input_images = tf.placeholder(tf.float32, shape=[None, None, None, 3], name='input_images')
-                global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0),
-                                              trainable=False)
+        #with tf.device('/device:GPU:0'):
+        with tf.Graph().as_default():
+            input_images = tf.placeholder(tf.float32, shape=[None, None, None, 3], name='input_images')
+            global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0),
+                                          trainable=False)
 
-                f_score, f_geometry = model.model(input_images, is_training=False)
+            f_score, f_geometry = model.model(input_images, is_training=False)
 
-                variable_averages = tf.train.ExponentialMovingAverage(0.997, global_step)
-                saver = tf.train.Saver(variable_averages.variables_to_restore())
+            variable_averages = tf.train.ExponentialMovingAverage(0.997, global_step)
+            saver = tf.train.Saver(variable_averages.variables_to_restore())
 
-                # 创建会话
-                with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
-                    # 初始化模型参数：从checkpoint文件导入
-                    ckpt_state = tf.train.get_checkpoint_state(self.checkpoint_dir)
-                    model_path = os.path.join(self.checkpoint_dir, os.path.basename(ckpt_state.model_checkpoint_path))
-                    print('Restore from {}'.format(model_path))
-                    saver.restore(sess, model_path)
+            # 创建会话
+            with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
+                # 初始化模型参数：从checkpoint文件导入
+                ckpt_state = tf.train.get_checkpoint_state(self.checkpoint_dir)
+                model_path = os.path.join(self.checkpoint_dir, os.path.basename(ckpt_state.model_checkpoint_path))
+                print('Restore from {}'.format(model_path))
+                saver.restore(sess, model_path)
 
-                    im_fn_list = self.get_images()
-                    for im_fn in im_fn_list:
-                        im = cv2.imread(im_fn)[:, :, ::-1]
-                        start_time = time.time()
-                        im_resized, (ratio_h, ratio_w) = self.resize_image(im)
+                im_fn_list = self.get_images()
+                for im_fn in im_fn_list:
+                    im = cv2.imread(im_fn)[:, :, ::-1]
+                    start_time = time.time()
+                    im_resized, (ratio_h, ratio_w) = self.resize_image(im)
 
-                        timer = {'net': 0, 'restore': 0, 'nms': 0}
-                        start = time.time()
-                        score, geometry = sess.run([f_score, f_geometry], feed_dict={input_images: [im_resized]})
-                        timer['net'] = time.time() - start
+                    timer = {'net': 0, 'restore': 0, 'nms': 0}
+                    start = time.time()
+                    score, geometry = sess.run([f_score, f_geometry], feed_dict={input_images: [im_resized]})
+                    timer['net'] = time.time() - start
 
-                        boxes, timer = self.detect(score_map=score, geo_map=geometry, timer=timer)
-                        print('{} : net {:.0f}ms, restore {:.0f}ms, nms {:.0f}ms'.format(
-                            im_fn, timer['net'] * 1000, timer['restore'] * 1000, timer['nms'] * 1000))
+                    boxes, timer = self.detect(score_map=score, geo_map=geometry, timer=timer)
+                    print('{} : net {:.0f}ms, restore {:.0f}ms, nms {:.0f}ms'.format(
+                        im_fn, timer['net'] * 1000, timer['restore'] * 1000, timer['nms'] * 1000))
 
-                        if boxes is not None:
-                            boxes = boxes[:, :8].reshape((-1, 4, 2))
-                            boxes[:, :, 0] /= ratio_w
-                            boxes[:, :, 1] /= ratio_h
+                    if boxes is not None:
+                        boxes = boxes[:, :8].reshape((-1, 4, 2))
+                        boxes[:, :, 0] /= ratio_w
+                        boxes[:, :, 1] /= ratio_h
 
-                        duration = time.time() - start_time
-                        print('[timing] {}'.format(duration))
+                    duration = time.time() - start_time
+                    print('[timing] {}'.format(duration))
 
-                        # save to file
-                        if boxes is not None:
-                            res_file = os.path.join(
-                                self.output_dir,
-                                '{}.txt'.format(
-                                    os.path.basename(im_fn).split('.')[0]))
+                    # save to file
+                    if boxes is not None:
+                        res_file = os.path.join(
+                            self.output_dir,
+                            '{}.txt'.format(
+                                os.path.basename(im_fn).split('.')[0]))
 
-                            with open(res_file, 'w') as f:
-                                for i, box in enumerate(boxes):
-                                    # to avoid submitting errors
-                                    box = self.sort_poly(box.astype(np.int32))
-                                    if np.linalg.norm(box[0] - box[1]) < 5 or np.linalg.norm(box[3] - box[0]) < 5:
-                                        continue
-                                    f.write('{},{},{},{},{},{},{},{}\r\n'.format(
-                                        box[0, 0], box[0, 1], box[1, 0], box[1, 1], box[2, 0], box[2, 1], box[3, 0],
-                                        box[3, 1],
-                                    ))
-                                    cv2.polylines(im[:, :, ::-1], [box.astype(np.int32).reshape((-1, 1, 2))], True,
-                                                  color=(255, 255, 0), thickness=1)
-                                    self.cut_roi(im[:, :, ::-1], box, im_fn, i)
-                        if not self.no_write_images:
-                            img_path = os.path.join(self.output_dir, os.path.basename(im_fn))
-                            cv2.imwrite(img_path, im[:, :, ::-1])
+                        with open(res_file, 'w') as f:
+                            for i, box in enumerate(boxes):
+                                # to avoid submitting errors
+                                box = self.sort_poly(box.astype(np.int32))
+                                if np.linalg.norm(box[0] - box[1]) < 5 or np.linalg.norm(box[3] - box[0]) < 5:
+                                    continue
+                                f.write('{},{},{},{},{},{},{},{}\r\n'.format(
+                                    box[0, 0], box[0, 1], box[1, 0], box[1, 1], box[2, 0], box[2, 1], box[3, 0],
+                                    box[3, 1],
+                                ))
+                                #cv2.polylines(im[:, :, ::-1], [box.astype(np.int32).reshape((-1, 1, 2))], True,
+                                              #color=(255, 255, 0), thickness=1)
+                                self.cut_roi(im[:, :, ::-1], box, im_fn, i)
+                    #if not self.no_write_images:
+                        #img_path = os.path.join(self.output_dir, os.path.basename(im_fn))
+                        #cv2.imwrite(img_path, im[:, :, ::-1])
+                sess.close()
 
 if __name__ == '__main__':
     myeast = eastclass()

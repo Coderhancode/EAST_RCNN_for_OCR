@@ -1,5 +1,5 @@
 import tensorflow as tf
-import os.path as ops
+import os
 import numpy as np
 import cv2
 import argparse
@@ -10,15 +10,34 @@ from crnn.crnn_model import crnn_model
 from crnn.global_configuration import config
 from crnn.local_utils import log_utils, data_utils
 
+from east.icdar import get_images
+
 logger = log_utils.init_logger()
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 class crnnclass(object):
 
     def __init__(self):
-        self.image_path = 'crnn/data/test_images/test_05.jpg'
+        self.image_dir = 'output/EAST/'
         self.checkpoint_dir = '/home/han/project/github-proj/CRNN_Tensorflow_Old_Version/model/shadownet/shadownet_2017-10-17-11-47-46.ckpt-199999'
         self.num_classes = 37
+
+    def get_images(self):
+        '''
+        find image files in test data path
+        :return: list of files found
+        '''
+        files = []
+        exts = ['jpg', 'png', 'jpeg', 'JPG']
+        for parent, dirnames, filenames in os.walk(self.image_dir):
+            for filename in filenames:
+                for ext in exts:
+                    if filename.endswith(ext):
+                        files.append(os.path.join(parent, filename))
+                        break
+        print('Find {} images'.format(len(files)))
+        return files
 
     def crnn_detect(self, is_vis: bool=True):
         """
@@ -27,10 +46,6 @@ class crnnclass(object):
         :param is_vis:
         :param num_classes:
         """
-
-        image = cv2.imread(self.image_path, cv2.IMREAD_COLOR)
-        image = cv2.resize(image, tuple(config.cfg.ARCH.INPUT_SIZE))
-        image = np.expand_dims(image, axis=0).astype(np.float32)
 
         w, h = config.cfg.ARCH.INPUT_SIZE
         inputdata = tf.placeholder(dtype=tf.float32, shape=[1, h, w, 3], name='input')
@@ -53,6 +68,8 @@ class crnnclass(object):
         sess_config = tf.ConfigProto()
         sess_config.gpu_options.per_process_gpu_memory_fraction = config.cfg.TRAIN.GPU_MEMORY_FRACTION
         sess_config.gpu_options.allow_growth = config.cfg.TRAIN.TF_ALLOW_GROWTH
+        #sess_config.allow_soft_placement = True
+        #sess_config.log_device_placement = True
 
         # config tf saver
         saver = tf.train.Saver()
@@ -61,18 +78,26 @@ class crnnclass(object):
 
         with sess.as_default():
 
-            saver.restore(sess=sess, save_path=self.checkpoint_dir)
+            files = self.get_images()
 
-            preds = sess.run(decodes, feed_dict={inputdata: image})
+            for image_path in files:
+                print(image_path)
+                image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+                image = cv2.resize(image, tuple(config.cfg.ARCH.INPUT_SIZE))
+                image = np.expand_dims(image, axis=0).astype(np.float32)
 
-            preds = codec.writer.sparse_tensor_to_str(preds[0])
+                saver.restore(sess=sess, save_path=self.checkpoint_dir)
 
-            logger.info('Predict image {:s} label {:s}'.format(ops.split(self.image_path)[1], preds[0]))
+                preds = sess.run(decodes, feed_dict={inputdata: image})
 
-            if is_vis:
-                plt.figure('CRNN Model Demo')
-                plt.imshow(cv2.imread(self.image_path, cv2.IMREAD_COLOR)[:, :, (2, 1, 0)])
-                plt.show()
+                preds = codec.writer.sparse_tensor_to_str(preds[0])
+
+                logger.info('Predict image {:s} label {:s}'.format(os.path.split(image_path)[1], preds[0]))
+
+                if is_vis:
+                    plt.figure('CRNN Model Demo')
+                    plt.imshow(cv2.imread(image_path, cv2.IMREAD_COLOR)[:, :, (2, 1, 0)])
+                    plt.show()
 
             sess.close()
 
